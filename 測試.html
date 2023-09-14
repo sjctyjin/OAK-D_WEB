@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>按住按钮累加变量</title>
+</head>
+<body>
+
+<button id="incrementButton">按住累加</button>
+<p id="result">0</p>
+
+<script>
+  // 获取按钮元素和结果元素
+  var incrementButton = document.getElementById('incrementButton');
+  var resultElement = document.getElementById('result');
+
+  // 初始化变量
+  var count = 0;
+  var interval;
+
+  // 当按钮按下时开始累加
+  incrementButton.addEventListener('mousedown', function() {
+    // 设置累加的间隔时间（毫秒）
+    interval = setInterval(function() {
+      count++;
+      resultElement.textContent = count;
+    }, 100); // 这里的100表示每100毫秒累加一次
+  });
+
+  // 当按钮释放时停止累加
+  incrementButton.addEventListener('mouseup', function() {
+    clearInterval(interval);
+  });
+
+  // 当鼠标移开按钮时停止累加
+  incrementButton.addEventListener('mouseout', function() {
+    clearInterval(interval);
+  });
+</script>
+
+</body>
+</html>
