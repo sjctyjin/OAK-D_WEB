@@ -316,10 +316,6 @@ def process_images():#OAK-D
                     imOut = np.hstack((depthFrameColor, frame))
                     # imOut = np.hstack((imOut, frame))
                     cv2.waitKey(1)
-
-
-                else:
-                    break
             else:
                 break
             image_queue.append(imOut)
@@ -375,10 +371,13 @@ def generate():
         # Get the latest processed image from the queue
         if terminate_thread:
             if image_queue != []:
-                frame = image_queue.pop()
-                # Encode the image to JPEG format
-                _, img_encoded = cv2.imencode('.jpg', frame)
-                image_queue = []
+                try:
+                    frame = image_queue.pop()
+                    # Encode the image to JPEG format
+                    _, img_encoded = cv2.imencode('.jpg', frame)
+                    image_queue = []
+                except:
+                    print("wrong")
         else:
             if image_queue != []:
                 try:
@@ -389,6 +388,105 @@ def generate():
                     print("wrong")
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + img_encoded.tobytes() + b'\r\n')
+
+def AutoRun(x,y,z,rx,ry,rz):
+    global terminate_thread
+    global image_queue_buffer
+    global labels_api
+    global Auto_Mode_switch
+
+    image_queue_buffer = []
+    print("自動模式開啟後",terminate_thread)
+    print("自動模式開啟後",Auto_Mode_switch)
+    roundtimes = 0
+    with open('camera_to_end_20230911_142411.yaml', 'r') as f:
+        cam2end_data = yaml.load(f.read(), Loader=yaml.FullLoader)
+
+    while terminate_thread:
+        if labels_api != []:
+            roundtimes += 1
+            Auto_Mode_switch = False
+
+            fruit_sequence = 0
+            # print(len(labels_api))
+            # for obj in range(len(labels_api)):
+            # print(labels_api[obj])
+            fruit_sequence += 1
+            data = labels_api.pop(0)
+            # print("ALL==========",data[0][1])
+
+            camx = int(data[0][1].split(',')[1][3:-3])
+            camy = int(data[0][1].split(',')[2][3:-3])
+            camz = int(data[0][1].split(',')[3][3:-3])
+            if camz > 1000:
+                break
+            # print(camx,camy,camz)
+
+            # 相機到末端
+            cam2end = np.array(cam2end_data["camera_to_end"], dtype=np.float64)
+            # print("相機到末端", cam2end @ [0, 0, 0, 1])
+            # print("相機到末端", np.dot(cam2end, [0, 0, 0, 1]))
+            # 末端到基座
+            end_to_base = pose_robot(rx, ry, rz, x, y, z)
+            RT_chess_to_base = end_to_base @ cam2end
+
+            # print("相機座標至末端座標值 : ",
+            #       RT_chess_to_base @ [round(tvecs[0][0], 2) * 10, round(tvecs[1][0] * 10, 2), round(tvecs[2][0] * 10, 2), 1])
+            # print("棋盤格座標轉換為機械手臂座標 : ",
+            #       RT_chess_to_base @ [camx, camy, camz, 1])
+            posecoord = RT_chess_to_base @ [camx, camy, camz, 1]
+            posex = round(posecoord[0], 3)
+            posey = round(posecoord[1], 3)
+            posez = round(posecoord[2], 3)
+            # print(posex, posey, posez)
+            url = 'http://192.168.2.105:8081/RoboControl.aspx/Web_SetCoords'
+
+            # 準備要發送的數據，這裡假設您要傳遞一個JSON對象
+            data = {'cordX': posex, 'cordY': posey, 'cordZ': posez, 'cordW': "", 'cordP': "", 'cordR': ""}
+
+            # 使用requests庫發送POST請求
+            response = requests.post(url, json=data, verify=False)
+
+            # 檢查請求是否成功
+            if response.status_code == 200:
+                print('POST請求成功')
+                print('伺服器回應：', response.text)
+            else:
+                print('POST請求失敗')
+            #判斷長度
+            RDO1 = 1
+            print(f'第{fruit_sequence}顆')
+            while RDO1:
+                data = {"data": "get"}
+                url = 'http://192.168.2.105:8081/RoboControl.aspx/Web_ReadRDO'
+                # 使用requests庫發送POST請求
+                response = requests.post(url, json=data, verify=False)
+                # 檢查請求是否成功
+                if response.status_code == 200:
+
+                    # print('伺服器回應：', response.json()["d"])
+
+                    if response.json()["d"] == "0":
+                        print("結束")
+                        break
+                else:
+                    print('POST請求失敗')
+                time.sleep(1)
+            labels_api = []
+            print(f"完成第{roundtimes}輪")
+            print("="*50)
+        Auto_Mode_switch = True
+        print("相機執行序 : ",terminate_thread)
+        print("幀數執行序 : ",Auto_Mode_switch)
+
+        """
+        當前展示以拍一張後，一次把每個水果都採摘完畢
+        
+        實際運行成果應以
+        拍攝到第一張 優先抓取信心度最高的水果，
+        抓取完成後回到原點，並收到RD[1] = 0後，重新抓拍一次，
+        這樣才能確保水果都能被採摘完成而不進入無限迴圈
+        """
 
 #用于根据欧拉角计算旋转矩阵
 def myRPY2R_robot(x, y, z):
@@ -479,6 +577,8 @@ def robotcoord():
     else:
         print('POST請求失敗')
 
+
+
     return Response("ff")
 #調整閾值
 @app.route('/threshold', methods=['POST'])
@@ -497,6 +597,7 @@ def close_screen():
     global image_queue_buffer
     global image_queue
     global robot_coord
+    global Auto_Mode_switch
 
     robot_coord = []#清空robot紀錄
     print("關閉後",image_queue_buffer)
@@ -505,6 +606,7 @@ def close_screen():
     ct = time.time()
     print("測試")
     terminate_thread = False
+    Auto_Mode_switch = True
     return jsonify({f"turn off done": "%s.%03d" % (time.strftime('%H:%M:%S'),(ct-int(ct))*1000)})
 
 #打開偵測
@@ -553,8 +655,7 @@ def openAutoMode():
         processing_thread = threading.Thread(target=process_images)
         processing_thread.daemon = True
         processing_thread.start()
-    if labels_api != []:
-        Auto_Mode_switch = False
+
         data_res = request.get_json()
 
         x = float(data_res['coordx'])
@@ -563,54 +664,9 @@ def openAutoMode():
         rx = float(data_res['coordw'])
         ry = float(data_res['coordp'])
         rz = float(data_res['coordr'])
-
-        for obj in range(len(labels_api)):
-            data = labels_api.pop(0)
-            print("ALL==========",data[0][1])
-
-            camx = int(data[0][1].split(',')[1][3:-3])
-            camy = int(data[0][1].split(',')[2][3:-3])
-            camz = int(data[0][1].split(',')[3][3:-3])
-            if camz > 1000:
-                break
-            print(camx,camy,camz)
-
-            with open('camera_to_end_20230911_142411.yaml', 'r') as f:
-                cam2end_data = yaml.load(f.read(), Loader=yaml.FullLoader)
-            # 相機到末端
-            cam2end = np.array(cam2end_data["camera_to_end"], dtype=np.float64)
-            print("相機到末端", cam2end @ [0, 0, 0, 1])
-            print("相機到末端", np.dot(cam2end, [0, 0, 0, 1]))
-            # 末端到基座
-            end_to_base = pose_robot(rx, ry, rz, x, y, z)
-            RT_chess_to_base = end_to_base @ cam2end
-
-            # print("相機座標至末端座標值 : ",
-            #       RT_chess_to_base @ [round(tvecs[0][0], 2) * 10, round(tvecs[1][0] * 10, 2), round(tvecs[2][0] * 10, 2), 1])
-            print("棋盤格座標轉換為機械手臂座標 : ",
-                  RT_chess_to_base @ [camx, camy, camz, 1])
-            posecoord = RT_chess_to_base @ [camx, camy, camz, 1]
-            posex = round(posecoord[0], 3)
-            posey = round(posecoord[1], 3)
-            posez = round(posecoord[2], 3)
-            print(posex, posey, posez)
-            url = 'http://192.168.2.105:8081/RoboControl.aspx/Web_SetCoords'
-
-            # 準備要發送的數據，這裡假設您要傳遞一個JSON對象
-            data = {'cordX': posex, 'cordY': posey, 'cordZ': posez, 'cordW': "", 'cordP': "", 'cordR': ""}
-
-            # 使用requests庫發送POST請求
-            response = requests.post(url, json=data, verify=False)
-
-            # 檢查請求是否成功
-            if response.status_code == 200:
-                print('POST請求成功')
-                print('伺服器回應：', response.text)
-            else:
-                print('POST請求失敗')
-        print(labels_api)
-        Auto_Mode_switch = True
-
+        processing_Auto = threading.Thread(target=AutoRun,args=(x,y,z,rx,ry,rz))
+        processing_Auto.daemon = True
+        processing_Auto.start()
         # print(len(labels_api))
     return jsonify({f"turn off done":labels_api})
 
@@ -652,7 +708,7 @@ if __name__ == '__main__':
     # processing_thread = threading.Thread(target=process_images)
     # processing_thread.daemon = True
     # processing_thread.start()
-    app.run(host='192.168.2.105', ssl_context=('server.crt', 'server.key'), threaded=True)
+    app.run(host='0.0.0.0', ssl_context=('server.crt', 'server.key'), threaded=True)
 
     # app.run(host='0.0.0.0',threaded=True )
 
