@@ -61,7 +61,9 @@ def process_images():#OAK-D
 
     # nnBlobPath = str(
     #     (Path(__file__).parent / Path('yolo-v4-tiny-tf_openvino_2021.4_6shave.blob')).resolve().absolute())
-    mpath = "yolov5n_openvino_2021.4_6shave.blob"
+    # mpath = "yolov5n_openvino_2021.4_6shave.blob"
+    mpath = "yolov5nbatch1_openvino_2021.4_6shave.blob"
+    # mpath = "yolov5l_tangerine.blob"
     nnBlobPath = str((Path(__file__).parent / Path(mpath)).resolve().absolute())
     # nnBlobPath = str((Path(__file__).parent / Path('../models/person-detection-retail-0013_openvino_2021.4_7shave.blob')).resolve().absolute())
     # if 1 < len(sys.argv):
@@ -131,14 +133,17 @@ def process_images():#OAK-D
     camRgb.setColorOrder(dai.ColorCameraProperties.ColorOrder.BGR)
 
     monoLeft.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P)
-    monoLeft.setBoardSocket(dai.CameraBoardSocket.LEFT)
+    # monoLeft.setBoardSocket(dai.CameraBoardSocket.LEFT)
+    monoLeft.setBoardSocket(dai.CameraBoardSocket.CAM_B)
     monoRight.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P)
-    monoRight.setBoardSocket(dai.CameraBoardSocket.RIGHT)
+    # monoRight.setBoardSocket(dai.CameraBoardSocket.RIGHT)
+    monoRight.setBoardSocket(dai.CameraBoardSocket.CAM_C)
 
     # setting node configs
     stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.HIGH_DENSITY)
     # Align depth map to the perspective of RGB camera, on which inference is done
-    stereo.setDepthAlign(dai.CameraBoardSocket.RGB)
+    # stereo.setDepthAlign(dai.CameraBoardSocket.RGB)
+    stereo.setDepthAlign(dai.CameraBoardSocket.CAM_A)
     stereo.setOutputSize(monoLeft.getResolutionWidth(), monoLeft.getResolutionHeight())
 
     spatialDetectionNetwork.setBlobPath(nnBlobPath)
@@ -190,7 +195,7 @@ def process_images():#OAK-D
         fps = 0
         color = (255, 255, 255)
         printOutputLayersOnce = True
-
+        imOut = []
         while True:
             if terminate_thread:
                 if Auto_Mode_switch:
@@ -334,8 +339,8 @@ def process_calibration():
     pipeline = dai.Pipeline()
     # 定義取用RGB相機
     cam_rgb = pipeline.create(dai.node.ColorCamera)
-    cam_rgb.setPreviewSize(416, 416)
-    cam_rgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_12_MP)
+    cam_rgb.setPreviewSize(1280, 1080)
+    cam_rgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
     cam_rgb.setInterleaved(False)
     # XLinkOut 是設備的“輸出”。您要傳輸到主機的任何數據都需要通過 XLink 發送
     xout_rgb = pipeline.create(dai.node.XLinkOut)
@@ -353,7 +358,7 @@ def process_calibration():
                 frame = in_rgb.getCvFrame()
                 if Take_photo:
                     check_times +=1
-                    cv2.imwrite(f'416x416_calibration/img/calibration{check_times}.jpg', frame)
+                    cv2.imwrite(f'1280x1080_calibration/img/{check_times}.jpg', frame)
                     Take_photo = False
             else:
                 break
@@ -365,29 +370,32 @@ def generate():
     global image_queue
     global terminate_thread
     global image_queue_buffer
-    while True:
-        if not image_queue:
-            continue
-        # Get the latest processed image from the queue
-        if terminate_thread:
-            if image_queue != []:
-                try:
-                    frame = image_queue.pop()
-                    # Encode the image to JPEG format
-                    _, img_encoded = cv2.imencode('.jpg', frame)
-                    image_queue = []
-                except:
-                    print("wrong")
-        else:
-            if image_queue != []:
-                try:
-                    frame = image_queue[0]
-                    # Encode the image to JPEG format
-                    _, img_encoded = cv2.imencode('.jpg', frame)
-                except:
-                    print("wrong")
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + img_encoded.tobytes() + b'\r\n')
+    try:
+        while True:
+            if not image_queue:
+                continue
+            # Get the latest processed image from the queue
+            if terminate_thread:
+                if image_queue != []:
+                    try:
+                        frame = image_queue.pop()
+                        # Encode the image to JPEG format
+                        _, img_encoded = cv2.imencode('.jpg', frame)
+                        image_queue = []
+                    except:
+                        print("wrong")
+            else:
+                if image_queue != []:
+                    try:
+                        frame = image_queue[0]
+                        # Encode the image to JPEG format
+                        _, img_encoded = cv2.imencode('.jpg', frame)
+                    except:
+                        print("wrong")
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + img_encoded.tobytes() + b'\r\n')
+    except:
+        return "Empty"
 
 def AutoRun(x,y,z,rx,ry,rz):
     global terminate_thread
@@ -399,7 +407,7 @@ def AutoRun(x,y,z,rx,ry,rz):
     print("自動模式開啟後",terminate_thread)
     print("自動模式開啟後",Auto_Mode_switch)
     roundtimes = 0
-    with open('camera_to_end_20230911_142411.yaml', 'r') as f:
+    with open('camera_to_end_20230922_155259_inFanuc_with1280.yaml', 'r') as f:
         cam2end_data = yaml.load(f.read(), Loader=yaml.FullLoader)
 
     while terminate_thread:
@@ -409,17 +417,25 @@ def AutoRun(x,y,z,rx,ry,rz):
 
             fruit_sequence = 0
             # print(len(labels_api))
-            # for obj in range(len(labels_api)):
+            measureZ = 1000
+            checkOrder = 0
+            for obj in range(len(labels_api)):
+                if measureZ > int(labels_api[obj][0][1].split(',')[3][3:-3]):
+                    measureZ = int(labels_api[obj][0][1].split(',')[3][3:-3])
+                    checkOrder = obj
             # print(labels_api[obj])
+
             fruit_sequence += 1
-            data = labels_api.pop(0)
+            # data = labels_api.pop(0)
+            data = labels_api[checkOrder]
             # print("ALL==========",data[0][1])
 
             camx = int(data[0][1].split(',')[1][3:-3])
             camy = int(data[0][1].split(',')[2][3:-3])
             camz = int(data[0][1].split(',')[3][3:-3])
-            if camz > 1000:
-                break
+
+            print("次序 : ", obj)
+            print("距離 : ", camz,"mm")
             # print(camx,camy,camz)
 
             # 相機到末端
@@ -435,11 +451,11 @@ def AutoRun(x,y,z,rx,ry,rz):
             # print("棋盤格座標轉換為機械手臂座標 : ",
             #       RT_chess_to_base @ [camx, camy, camz, 1])
             posecoord = RT_chess_to_base @ [camx, camy, camz, 1]
-            posex = round(posecoord[0], 3)
+            posex = round(posecoord[0], 3)-100
             posey = round(posecoord[1], 3)
-            posez = round(posecoord[2], 3)
+            posez = round(posecoord[2], 3)-200
             # print(posex, posey, posez)
-            url = 'http://192.168.2.105:8081/RoboControl.aspx/Web_SetCoords'
+            url = f'http://{hostIP}:8081/RoboControl.aspx/Web_SetCoords'
 
             # 準備要發送的數據，這裡假設您要傳遞一個JSON對象
             data = {'cordX': posex, 'cordY': posey, 'cordZ': posez, 'cordW': "", 'cordP': "", 'cordR': ""}
@@ -458,13 +474,13 @@ def AutoRun(x,y,z,rx,ry,rz):
             print(f'第{fruit_sequence}顆')
             while RDO1:
                 data = {"data": "get"}
-                url = 'http://192.168.2.105:8081/RoboControl.aspx/Web_ReadRDO'
+                url = f'http://{hostIP}/RoboControl.aspx/Web_ReadRDO'
                 # 使用requests庫發送POST請求
                 response = requests.post(url, json=data, verify=False)
                 # 檢查請求是否成功
                 if response.status_code == 200:
 
-                    # print('伺服器回應：', response.json()["d"])
+                    print('伺服器回應：', response.json()["d"])
 
                     if response.json()["d"] == "0":
                         print("結束")
@@ -542,7 +558,7 @@ def robotcoord():
     print(x,y,z,rx,ry,rz)
 
     # 載入相機相對於末端的變換矩陣 - 手眼標定結果
-    with open('camera_to_end_20230911_142411.yaml', 'r') as f:
+    with open('camera_to_end_20230922_155259_inFanuc_with1280.yaml', 'r') as f:
         cam2end_data = yaml.load(f.read(), Loader=yaml.FullLoader)
     # 相機到末端
     cam2end = np.array(cam2end_data["camera_to_end"], dtype=np.float64)
@@ -558,11 +574,11 @@ def robotcoord():
     print("棋盤格座標轉換為機械手臂座標 : ",
           RT_chess_to_base @ [camx , camy, camz, 1])
     posecoord = RT_chess_to_base @ [camx , camy, camz, 1]
-    posex = round(posecoord[0],3)
-    posey = round(posecoord[1],3)
-    posez = round(posecoord[2],3)
+    posex = round(posecoord[0],3)-60#深度 60mm
+    posey = round(posecoord[1],3)-10#左右
+    posez = round(posecoord[2],3)-90#高度
     print(posex,posey,posez)
-    url = 'http://192.168.2.105:8081/RoboControl.aspx/Web_SetCoords'
+    url = f'http://{hostIP}:8081/RoboControl.aspx/Web_SetCoords'
 
     # 準備要發送的數據，這裡假設您要傳遞一個JSON對象
     data = {'cordX': posex, 'cordY': posey, 'cordZ': posez, 'cordW': "", 'cordP': "", 'cordR': ""}
@@ -616,11 +632,11 @@ def open_screen():
     global image_queue_buffer
     image_queue_buffer = []
     print("開啟後",image_queue_buffer)
-
-    terminate_thread = True
-    processing_thread = threading.Thread(target=process_images)
-    processing_thread.daemon = True
-    processing_thread.start()
+    if not terminate_thread:
+        terminate_thread = True
+        processing_thread = threading.Thread(target=process_images)
+        processing_thread.daemon = True
+        processing_thread.start()
     return Response("done")
 
 #打開校正相機
@@ -688,7 +704,7 @@ def take():
                         ])
     print(robot_coord)
     df = pd.DataFrame(robot_coord, columns=['dx', 'dy', 'dz', 'ax', 'ay', 'az'])
-    df.to_csv('416x416_calibration/pos/pos.csv', index=False)
+    df.to_csv('1280x1080_calibration/pos/pos.csv', index=False)
     # Get the latest processed image from the queue
     return Response("done")
 
@@ -704,6 +720,7 @@ def index():
     return Response("none")
 
 if __name__ == '__main__':
+    hostIP = "192.168.1.105"
     # process_images()
     # processing_thread = threading.Thread(target=process_images)
     # processing_thread.daemon = True
